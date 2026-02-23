@@ -20,6 +20,35 @@ type MetadataField struct {
 	Value     interface{} `json:"value"` // Can be string, array, or object
 }
 
+type MetadataCompound map[string]MetadataField
+
+type MetadataFieldItem struct {
+	Name                       string                       `json:"name"`
+	DisplayName                string                       `json:"displayName"`
+	DisplayOnCreate            bool                         `json:"displayOnCreate"`
+	Title                      string                       `json:"title"`
+	Type                       string                       `json:"type"`
+	TypeClass                  string                       `json:"typeClass"`
+	Watermark                  string                       `json:"watermark"`
+	Description                string                       `json:"description"`
+	Multiple                   bool                         `json:"multiple"`
+	IsControlledVocabulary     bool                         `json:"isControlledVocabulary"`
+	IsAdvancedSearchFieldType  bool                         `json:"isAdvancedSearchFieldType"`
+	DisplayFormat              string                       `json:"displayFormat"`
+	DisplayOrder               int                          `json:"displayOrder"`
+	IsRequired                 bool                         `json:"isRequired"`
+	ControlledVocabularyValues []string                     `json:"controlledVocabularyValues,omitempty"`
+	ChildFields                map[string]MetadataFieldItem `json:"childFields,omitempty"`
+}
+
+type MetadataBlockInfo struct {
+	Id              int                          `json:"id"`
+	DisplayName     string                       `json:"displayName"`
+	DisplayOnCreate bool                         `json:"displayOnCreate"`
+	Name            string                       `json:"name"`
+	Fields          map[string]MetadataFieldItem `json:"fields"`
+}
+
 type License struct {
 	Name                   string `json:"name"`
 	Uri                    string `json:"uri"`
@@ -31,27 +60,30 @@ type License struct {
 }
 
 type DatasetVersion struct {
-	ID                           int       `json:"id"`
-	DatasetId                    int       `json:"datasetId"`
-	DatasetPersistentId          string    `json:"datasetPersistentId"`
-	DatasetType                  string    `json:"datasetType"`
-	StorageIdentifier            string    `json:"storageIdentifier"`
-	VersionNumber                int       `json:"versionNumber"`
-	InternalVersionNumber        int       `json:"internalVersionNumber"`
-	VersionMinorNumber           int       `json:"versionMinorNumber"`
-	VersionState                 string    `json:"versionState"`
-	LatestVersionPublishingState string    `json:"latestVersionPublishingState"`
-	DeaccessionLink              string    `json:"deaccessionLink"`
-	ProductionDate               string    `json:"productionDate"`
-	LastUpdateTime               time.Time `json:"lastUpdateTime"`
-	ReleaseTime                  time.Time `json:"releaseTime"`
-	CreateTime                   time.Time `json:"createTime"`
-	PublicationDate              string    `json:"publicationDate"`
-	CitationDate                 string    `json:"citationDate"`
+	ID                           int       `json:"id,omitempty"`
+	DatasetId                    int       `json:"datasetId,omitempty"`
+	DatasetPersistentId          string    `json:"datasetPersistentId,omitempty"`
+	DatasetType                  string    `json:"datasetType,omitempty"`
+	StorageIdentifier            string    `json:"storageIdentifier,omitempty"`
+	VersionNumber                int       `json:"versionNumber,omitempty"`
+	InternalVersionNumber        int       `json:"internalVersionNumber,omitempty"`
+	VersionMinorNumber           int       `json:"versionMinorNumber,omitempty"`
+	VersionState                 string    `json:"versionState,omitempty"`
+	LatestVersionPublishingState string    `json:"latestVersionPublishingState,omitempty"`
+	DeaccessionLink              string    `json:"deaccessionLink,omitempty"`
+	ProductionDate               string    `json:"productionDate,omitempty"`
+	LastUpdateTime               time.Time `json:"lastUpdateTime,omitempty"`
+	ReleaseTime                  time.Time `json:"releaseTime,omitempty"`
+	CreateTime                   time.Time `json:"createTime,omitempty"`
+	PublicationDate              string    `json:"publicationDate,omitempty"`
+	CitationDate                 string    `json:"citationDate,omitempty"`
 	License                      License   `json:"license,omitempty"`
-	FileAccessRequest            bool      `json:"fileAccessRequest"`
+	FileAccessRequest            bool      `json:"fileAccessRequest,omitempty"`
 
-	MetadataBlocks map[string]MetadataBlock `json:"metadataBlocks"`
+	MetadataBlocks map[string]MetadataBlock `json:"metadataBlocks,omitempty"`
+}
+type CreateDatasetItem struct {
+	DatasetVersionField DatasetVersion `json:"datasetVersion"`
 }
 
 type ItemInDataverse struct {
@@ -108,4 +140,58 @@ type ApiClient struct {
 	BaseUrl    string
 	ApiToken   string
 	HttpClient *http.Client
+}
+
+func primitiveOneField(typeName string, value string) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  false,
+		TypeClass: "primitive",
+		Value:     value,
+	}
+}
+
+func primitiveArrayField(typeName string, value []string) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  true,
+		TypeClass: "primitive",
+		Value:     value,
+	}
+}
+
+func compoundOneField(typeName string, value MetadataCompound) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  false,
+		TypeClass: "compound",
+		Value:     value,
+	}
+}
+
+func controlledVocabArrayField(typeName string, multiple bool, value []string) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  true,
+		TypeClass: "controlledVocabulary",
+		Value:     value,
+	}
+}
+
+func controlledVocabOneField(typeName string, multiple bool, value string) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  false,
+		TypeClass: "controlledVocabulary",
+		Value:     value,
+	}
+}
+
+func compoundArrayField(typeName string, multiple bool, value []MetadataCompound) MetadataField {
+	return MetadataField{
+		TypeName:  typeName,
+		Multiple:  true,
+		TypeClass: "compound",
+		Value:     value,
+	}
 }

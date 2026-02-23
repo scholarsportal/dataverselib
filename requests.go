@@ -1,12 +1,17 @@
 package dataverselib
 
 import (
+	"bytes"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 )
 
-func GetRequest(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client) (*http.Response, error) {
+func Request(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, jsonData []byte, method string) (*http.Response, error) {
 	resp := &http.Response{}
+
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return resp, err
@@ -28,7 +33,19 @@ func GetRequest(requestParameters map[string]interface{}, urlString string, head
 	}
 
 	u.RawQuery = q.Encode() // encode parameters into URL
-	req, err := http.NewRequest("GET", u.String(), nil)
+	log.Println(u.String())
+	var body io.Reader
+	if jsonData != nil {
+		log.Println(jsonData)
+		body = bytes.NewReader(jsonData)
+	} else {
+		log.Println("Json data is nil")
+	}
+	log.Println(method)
+	if body == nil {
+		log.Println("Body is nil")
+	}
+	req, err := http.NewRequest(method, u.String(), body)
 	if err != nil {
 		return resp, err
 	}
@@ -50,4 +67,26 @@ func GetRequest(requestParameters map[string]interface{}, urlString string, head
 	}
 
 	return resp, nil
+}
+
+func GetRequest(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client) (*http.Response, error) {
+	resp, err := Request(requestParameters, urlString, headers, client, nil, "GET")
+	return resp, err
+}
+
+func PostRequest(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, jsonData []byte) (*http.Response, error) {
+	resp, err := Request(requestParameters, urlString, headers, client, jsonData, "POST")
+	return resp, err
+}
+
+func PostRequestFile(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, filePath string) (*http.Response, error) {
+	// Read file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	resp, err := PostRequest(requestParameters, urlString, headers, client, data)
+	return resp, err
+
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // GetVersionOfDataset get a specific version of a dataverse dataset.
@@ -666,4 +667,358 @@ func ConvertMetadataToCSVFormat(datasets []SearchItem, mbDict map[string]string)
 
 	}
 	return records, headers
+}
+
+// GetMetadataBlockField gets metadatablock fields for specific metadatablock.
+// It uses dataverse native API, documentation https://guides.dataverse.org/en/latest/api/native-api.html#show-info-about-single-metadata-block
+//
+// Parameters:
+//   - apiClient: *ApiClient - Dataverse API client (BaseUrl, ApiToken, HttpClient)
+//   - metadataBlockName: string - name of the metadata block (e.g., "geospatial", "citation", etc)
+//
+// Returns:
+//   - MetadataBlockInfo struct, which contains name of the metadata block and its fields, which can be used to get the metadata fields of the metadata block for further processing
+//   - error if the request fail
+func GetMetadataBlockFields(apiClient *ApiClient, metadataBlockName string) (MetadataBlockInfo, error) {
+	//$SERVER/api/metadatablocks/geospatial
+	log.Println("Start getting metadata block fields for:", metadataBlockName)
+	client := apiClient.HttpClient
+	r := RequestResponse{}
+	mb := MetadataBlockInfo{}
+
+	u := apiClient.BaseUrl + "/api/metadatablocks/" + metadataBlockName
+	log.Println(u)
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+	}
+
+	resp, err := GetRequest(nil, u, headers, client)
+	if err != nil {
+		log.Printf("Error making request: %s\n", err)
+		return mb, err
+	}
+	defer resp.Body.Close()
+	if err != nil {
+		return mb, err
+	}
+	log.Println(resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return mb, fmt.Errorf("Error to get search: %s", resp.Status)
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&r)
+	if err != nil {
+		return mb, err
+	}
+	if r.Status == "OK" {
+		json.Unmarshal(r.Data, &mb)
+	} else {
+		return mb, fmt.Errorf("Error from server getting search: %s ", r.Message)
+	}
+	log.Println(mb.Fields)
+	return mb, nil
+
+}
+
+// CreateHeadersCSVMetadata creates an array of column names for the csv file, which can be used as header of the csv file, based on the metadata blocks and their fields defined in the dataverse collection.
+//
+// Parameters:
+//   - apiClient: *ApiClient - Dataverse API client (BaseUrl, ApiToken, HttpClient)
+//   - dataverseAlias: string - alias of the dataverse collection (e.g., "root", "international", etc)
+//
+// Returns:
+//   - MetadataBlockInfo struct, which contains name of the metadata block and its fields, which can be used to get the metadata fields of the metadata block for further processing
+//   - error if the request fail
+func CreateHeadersCSVMetadata(apiClient *ApiClient, dataverseAlias string) ([]string, error) {
+	headers := []string{}
+	mbList, _, err := GetListOfMetadataBlocksOfDataverse(apiClient, dataverseAlias, nil)
+	if err != nil {
+		log.Printf("Error getting metadata blocks for dataverse %s: %s\n", dataverseAlias, err)
+		return headers, err
+	}
+	for _, mb := range mbList {
+		fmt.Println(mb)
+		mbInfo, err := GetMetadataBlockFields(apiClient, mb)
+		if err != nil {
+			log.Printf("Error getting metadata block fields for metadata block %s: %s\n", mb, err)
+			return headers, err
+		}
+		for _, field := range mbInfo.Fields {
+			column := mb + ":" + field.Name
+			headers = append(headers, column)
+		}
+	}
+
+	return headers, nil
+}
+
+func CreateDatasetWithJson(apiClient *ApiClient, dataverseAlias string, parameters map[string]interface{}, jsonData []byte) (string, error) {
+	// curl -H "X-Dataverse-key:$API_TOKEN" -X POST "$SERVER_URL/api/dataverses/$PARENT/datasets?doNotValidate=true" --upload-file dataset-incomplete.json -H 'Content-type:application/json'
+	persistentId := ""
+	url := apiClient.BaseUrl + "/api/dataverses/" + dataverseAlias + "/datasets"
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+		"Content-type":    "application/json",
+	}
+	fmt.Printf("%s\n", string(jsonData))
+
+	resp, err := PostRequest(parameters, url, headers, apiClient.HttpClient, jsonData)
+	if err != nil {
+		log.Println(err)
+		return persistentId, err
+	}
+
+	defer resp.Body.Close()
+	if err != nil {
+		return persistentId, err
+	}
+	fmt.Println(resp.StatusCode)
+	if resp.StatusCode != 201 {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return persistentId, err
+		}
+		return persistentId, fmt.Errorf("Error CreateDatasetWithJson: %s, %d\n", string(bodyBytes), resp.StatusCode)
+	}
+
+	return persistentId, nil
+}
+func FindRequiredFields(metaFields []MetadataBlockInfo) (map[string][]string, error) {
+	requiredFields := make(map[string][]string)
+	for _, mb := range metaFields {
+		for _, field := range mb.Fields {
+			if field.IsRequired {
+				requiredFields[mb.Name+":"+field.Name] = make([]string, 0)
+				if field.ChildFields != nil {
+					for _, child := range field.ChildFields {
+						if child.IsRequired {
+							requiredFields[mb.Name+":"+field.Name] = append(requiredFields[mb.Name+":"+field.Name], child.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+	return requiredFields, nil
+}
+
+func CheckMandatoryFieldsInHeaders(metaFields []MetadataBlockInfo, headers []string) ([]string, error) {
+	requiredFieldsMissing := make([]string, 0)
+	requiredFields, err := FindRequiredFields(metaFields)
+	if err != nil {
+		return requiredFieldsMissing, err
+	}
+
+	set := make(map[string]struct{})
+
+	// make set from headers
+	for _, element := range headers {
+		set[element] = struct{}{}
+	}
+	for field, _ := range requiredFields {
+		if _, exists := set[field]; !exists {
+			requiredFieldsMissing = append(requiredFieldsMissing, field)
+		}
+	}
+	return requiredFieldsMissing, nil
+
+}
+func CreateMapBlockFields(metaFields []MetadataBlockInfo) (map[string]map[string]MetadataFieldItem, error) {
+	blockFields := make(map[string]map[string]MetadataFieldItem)
+	for _, mb := range metaFields {
+		blockFields[mb.Name] = mb.Fields
+	}
+	return blockFields, nil
+}
+
+func CreateDataverseDatasetVersionStruct(metaFields []MetadataBlockInfo, headers []string, row []string) (DatasetVersion, error) {
+	datasetVersion := DatasetVersion{}
+	datasetVersion.MetadataBlocks = make(map[string]MetadataBlock)
+	mainMissingMandatoryFields, err := CheckMandatoryFieldsInHeaders(metaFields, headers)
+	if err != nil {
+		return datasetVersion, err
+	}
+	if len(mainMissingMandatoryFields) > 0 {
+		return datasetVersion, fmt.Errorf("Missing mandatory fields in headers: %v", mainMissingMandatoryFields)
+	}
+
+	blockFields, _ := CreateMapBlockFields(metaFields)
+	metadataBlocksNames := make(map[string]struct{})
+	var metadatablock MetadataBlock
+	for i, column := range headers {
+		value := row[i]
+		split := strings.Split(column, ":")
+		if len(split) != 2 {
+			return datasetVersion, fmt.Errorf("Invalid column name: %s", column)
+		}
+
+		if _, ok := metadataBlocksNames[split[0]]; !ok {
+			metadataBlocksNames[split[0]] = struct{}{}
+			metadatablock = MetadataBlock{
+				Name:   split[0],
+				Fields: make([]MetadataField, 0),
+			}
+			//datasetVersion.MetadataBlocks[split[0]] = metadatablock
+		}
+		if fields, ok := blockFields[split[0]]; ok {
+
+			if field, ok := fields[split[1]]; ok {
+				mf := MetadataField{
+					TypeName:  field.Name,
+					TypeClass: field.TypeClass,
+					Multiple:  field.Multiple,
+					Value:     nil,
+				}
+				if field.TypeClass == "primitive" || field.TypeClass == "controlledVocabulary" {
+					if field.Multiple {
+						finalValueStringArray := strings.Split(value, "|")
+						mf.Value = finalValueStringArray
+
+						//metadatablock.Fields = append(metadatablock.Fields, mf)
+
+					} else {
+						mf.Value = value
+						//metadatablock.Fields = append(metadatablock.Fields, mf)
+
+					}
+
+				} else if field.TypeClass == "compound" {
+
+					if field.Multiple {
+						valueClassArray := make([]map[string]interface{}, 0)
+						elements := strings.Split(value, "|")
+						for _, element := range elements {
+							m := make(map[string]string)
+							err := json.Unmarshal([]byte(element), &m)
+							if err != nil {
+								return datasetVersion, fmt.Errorf("Error unmarshalling compound field value: %s", err)
+							}
+							var valueClassMult map[string]interface{} = make(map[string]interface{})
+							for key, _ := range m {
+								if _, ok := field.ChildFields[key]; !ok {
+									return datasetVersion, fmt.Errorf("Child field %s not found in metadata block %s for compound field %s", key, split[0], split[1])
+								} else {
+									childField := MetadataField{
+										TypeName:  key,
+										TypeClass: field.ChildFields[key].TypeClass,
+										Multiple:  field.ChildFields[key].Multiple,
+										Value:     m[key],
+									}
+									valueClassMult[key] = childField
+
+								}
+							}
+							valueClassArray = append(valueClassArray, valueClassMult)
+
+						}
+						mf.Value = valueClassArray
+						//metadatablock.Fields = append(metadatablock.Fields, mf)
+					} else {
+						element := value
+						m := make(map[string]string)
+						err := json.Unmarshal([]byte(element), &m)
+						if err != nil {
+							return datasetVersion, fmt.Errorf("Error unmarshalling compound field value: %s", err)
+						}
+						var valueClassMult map[string]interface{} = make(map[string]interface{})
+						for key, _ := range m {
+							if _, ok := field.ChildFields[key]; !ok {
+								return datasetVersion, fmt.Errorf("Child field %s not found in metadata block %s for compound field %s", key, split[0], split[1])
+							} else {
+								childField := MetadataField{
+									TypeName:  key,
+									TypeClass: field.ChildFields[key].TypeClass,
+									Multiple:  field.ChildFields[key].Multiple,
+									Value:     m[key],
+								}
+								valueClassMult[key] = childField
+							}
+						}
+						mf.Value = valueClassMult
+					}
+
+				} else {
+					return datasetVersion, fmt.Errorf("Field %s not found in metadata block %s", split[1], split[0])
+				}
+				metadatablock.Fields = append(metadatablock.Fields, mf)
+			}
+		}
+		datasetVersion.MetadataBlocks[split[0]] = metadatablock
+
+	}
+
+	return datasetVersion, nil
+}
+
+func CreateDataset(apiClient *ApiClient, dataverseAlias string, datasetVersion DatasetVersion) (string, error) {
+	//default license CC0 1.0
+	if datasetVersion.License.Name == "" && datasetVersion.License.Uri == "" {
+		datasetVersion.License.Name = "CC0 1.0"
+		datasetVersion.License.Uri = "http://creativecommons.org/publicdomain/zero/1.0"
+	}
+
+	dataset := CreateDatasetItem{
+		DatasetVersionField: datasetVersion,
+	}
+
+	jsonData, err := json.Marshal(dataset)
+	if err != nil {
+		return "", fmt.Errorf("Error marshalling dataset version: %s", err)
+	}
+	persistentId, err := CreateDatasetWithJson(apiClient, dataverseAlias, nil, jsonData)
+	if err != nil {
+		return "", fmt.Errorf("Error creating dataset with json: %s", err)
+	}
+	return persistentId, nil
+}
+
+// GetListOfMandatoryFieldsOfDataverse returns a map of blocks with mandatory fields for specific dataverse collection.
+// Parameters:
+//   - apiClient: *ApiClient - Dataverse API client (BaseUrl, ApiToken, HttpClient)
+//   - dataverseAlias: string - alias of the dataverse collection (e.g., "root", "international", etc)
+//
+// Returns:
+//   - a map of blocks, each block has an array of mandatory fields.
+//     Each such field is represented as a map where the key is the field name and the value is an array of its mandatory child fields (if any).
+//     If field is mandatory but there are no mandatory child fields, the array of child fields is empty.
+//     For example, citation block can have an array
+//
+// [map[datasetContact:[datasetContactEmail]] map[title:[]] map[dsDescription:[dsDescriptionValue]] map[subject:[]] map[author:[authorName]]]
+//   - error if the request fail
+func GetListOfMandatoryFieldsOfDataverse(apiClient *ApiClient, dataverseAlias string) (map[string][]map[string][]string, error) {
+	requiredFields := make(map[string][]map[string][]string)
+	mb, _, err := GetListOfMetadataBlocksOfDataverse(apiClient, dataverseAlias, nil)
+	if err != nil {
+		return nil, err
+	}
+	log.Println("Starting treating mb for dataverse:", dataverseAlias)
+	for _, mbName := range mb {
+
+		mbInfo, err := GetMetadataBlockFields(apiClient, mbName)
+		blockFields := make([]map[string][]string, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, field := range mbInfo.Fields {
+
+			if field.IsRequired {
+				childArray := make([]string, 0)
+
+				if field.ChildFields != nil {
+
+					for _, child := range field.ChildFields {
+						if child.IsRequired {
+
+							childArray = append(childArray, child.Name)
+						}
+					}
+				}
+				fields := make(map[string][]string)
+				fields[field.Name] = childArray
+				blockFields = append(blockFields, fields)
+			}
+		}
+		requiredFields[mbName] = blockFields
+	}
+	return requiredFields, nil
 }

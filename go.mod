@@ -1,3 +1,3 @@
-module github.com/lubitchv/dataverselib
+module github.com/scholarsportal/dataverselib
 
 go 1.25.4

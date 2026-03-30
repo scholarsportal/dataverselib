@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -155,8 +156,11 @@ func GetTotalCount(apiClient *ApiClient, parameters map[string]interface{}) (int
 
 	r := RequestResponse{}
 	s := SearchResult{}
-	headers := map[string]interface{}{
-		"X-Dataverse-key": apiClient.ApiToken,
+	headers := map[string]interface{}{}
+	if apiClient.ApiToken != "" {
+		headers = map[string]interface{}{
+			"X-Dataverse-key": apiClient.ApiToken,
+		}
 	}
 	resp, err := GetRequest(parameters, u, headers, apiClient.HttpClient)
 	defer resp.Body.Close()
@@ -182,7 +186,7 @@ func GetTotalCount(apiClient *ApiClient, parameters map[string]interface{}) (int
 }
 
 func getAllMetadataStartEndSearch(apiClient *ApiClient, parameters map[string]interface{}, jobs <-chan int, results chan<- []SearchItem) {
-
+	log.Println("Starting getAllMetadataStartEndSearch")
 	for start := range jobs {
 
 		r := RequestResponse{}
@@ -191,15 +195,20 @@ func getAllMetadataStartEndSearch(apiClient *ApiClient, parameters map[string]in
 		parameters["start"] = strconv.Itoa(start)
 
 		u := apiClient.BaseUrl + "/api/search"
-		headers := map[string]interface{}{
-			"X-Dataverse-key": apiClient.ApiToken,
+		headers := map[string]interface{}{}
+		if apiClient.ApiToken != "" {
+			headers = map[string]interface{}{
+				"X-Dataverse-key": apiClient.ApiToken,
+			}
 		}
+
 		resp, err := GetRequest(parameters, u, headers, apiClient.HttpClient)
 		defer resp.Body.Close()
 		if err != nil {
 			log.Printf("Error getting request for start:%d, %s\n", start, err)
 			return
 		}
+		log.Println("good")
 
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("Error in request status for start:%d, %d\n", start, resp.StatusCode)
@@ -211,6 +220,7 @@ func getAllMetadataStartEndSearch(apiClient *ApiClient, parameters map[string]in
 			log.Printf("Error decoding request for start:%d, %s\n", start, err)
 			return
 		}
+		log.Println(r.Status)
 		if r.Status == "OK" {
 			json.Unmarshal(r.Data, &s)
 		} else {
@@ -320,7 +330,7 @@ func GetAllMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient, dat
 //   - Search result is an array that contains SearchItem elements, which include global_id, identifier_of_dataverse, and metadata_blocks of each dataset in the search result
 //   - error if the request fail
 func GetSpecificMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient, dataverseAlias string, mbListPar []string, numOfWorkers int, numInBatch int, searchStr string) ([]SearchItem, error) {
-
+	log.Printf("Start getting metadata with search string: %s\n", searchStr)
 	allItems := make([]SearchItem, 0)
 
 	parameters := map[string]interface{}{
@@ -336,11 +346,21 @@ func GetSpecificMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient
 	if err != nil {
 		return nil, err
 	}
-
+	if totalCount <= numInBatch {
+		numInBatch = totalCount
+	}
 	numbOfRoutines := totalCount / numInBatch
 	if numInBatch*numbOfRoutines < totalCount {
 		numbOfRoutines = numbOfRoutines + 1
 	}
+
+	log.Println("number of routines", numbOfRoutines)
+	log.Println("number of workers", numOfWorkers)
+
+	n := math.Min(float64(numOfWorkers),float64 (numbOfRoutines))
+	numOfWorkers = int(n)
+
+	log.Println("New number of workers", numOfWorkers)
 
 	numOfJobs := numbOfRoutines
 	jobs := make(chan int, numOfJobs)
@@ -350,7 +370,9 @@ func GetSpecificMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient
 	for batch := 0; batch < numOfWorkers; batch++ {
 
 		start := batch * numInBatch
+		log.Println("Start:", start)
 		if start > totalCount-numInBatch {
+			log.Println("finish break")
 			break
 		}
 
@@ -528,8 +550,11 @@ func GetExportMetadataOfDataset(apiClient *ApiClient, persistentId string, expor
 	if !published {
 		url = url + "&version=:draft"
 	}
-	headers := map[string]interface{}{
-		"X-Dataverse-key": apiClient.ApiToken,
+	headers := map[string]interface{}{}
+	if apiClient.ApiToken != "" {
+		headers = map[string]interface{}{
+			"X-Dataverse-key": apiClient.ApiToken,
+		}
 	}
 	resp, err := GetRequest(requestParameters, url, headers, apiClient.HttpClient)
 	defer resp.Body.Close()
@@ -1021,4 +1046,9 @@ func GetListOfMandatoryFieldsOfDataverse(apiClient *ApiClient, dataverseAlias st
 		requiredFields[mbName] = blockFields
 	}
 	return requiredFields, nil
+}
+
+func GetJsonFromISO() error {
+
+	return nil
 }

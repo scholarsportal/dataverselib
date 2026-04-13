@@ -102,6 +102,16 @@ type File struct {
 	DataFile         DataFile `json:"dataFile,omitempty"`
 }
 
+type UpdateFileMetadataStruct struct {
+	Description    string   `json:"description,omitempty"`
+	Label          string   `json:"label,omitempty"`
+	DirectoryLabel string   `json:"directoryLabel,omitempty"`
+	Categories     []string `json:"categories,omitempty"`
+	Restrict       string   `json:"restrict,omitempty"`
+	ProvFreeform   string   `json:"provFreeform,omitempty"`
+	DataFileTags   []string `json:"dataFileTags,omitempty"`
+}
+
 type DatasetVersion struct {
 	ID                           int       `json:"id,omitempty"`
 	DatasetId                    int       `json:"datasetId,omitempty"`
@@ -184,6 +194,14 @@ type ApiClient struct {
 	BaseUrl    string
 	ApiToken   string
 	HttpClient *http.Client
+}
+
+type Config struct {
+	UrlBase        string `json:"url_base"`
+	ApiToken       string `json:"api_token,omitempty"`
+	DataverseAlias string `json:"dataverse_alias"`
+	NumOfWorkers   int    `json:"num_of_workers,omitempty"`
+	NumInSearch    int    `json:"num_in_search,omitempty"`
 }
 
 func primitiveOneField(typeName string, value string) MetadataField {

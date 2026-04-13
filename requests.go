@@ -94,30 +94,32 @@ func PostRequestFile(requestParameters map[string]interface{}, urlString string,
 
 func PostRequestMultiPartJsonAndFile(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, filePath string, jsonData string, method string) (*http.Response, error) {
 	resp := &http.Response{}
-	// Open file
-	file, err := os.Open(filePath)
-	if err != nil {
-		return resp, err
-	}
-	defer file.Close()
-
 	// Prepare body
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	// Open file
+	if filePath != "" {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return resp, err
+		}
+		defer file.Close()
 
-	// Add file field (equivalent to -F "file=@...")
-	part, err := writer.CreateFormFile("file", filePath)
-	if err != nil {
-		return resp, err
-	}
-	//Copy file content to part
-	_, err = io.Copy(part, file)
-	if err != nil {
-		return resp, err
+		// Add file field (equivalent to -F "file=@...")
+
+		part, err := writer.CreateFormFile("file", filePath)
+		if err != nil {
+			return resp, err
+		}
+		//Copy file content to part
+		_, err = io.Copy(part, file)
+		if err != nil {
+			return resp, err
+		}
 	}
 
 	//Add json file metadata
-	err = writer.WriteField("jsonData", jsonData)
+	err := writer.WriteField("jsonData", jsonData)
 	if err != nil {
 		return resp, err
 	}

@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -264,24 +265,28 @@ func GetAllMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient, dat
 	}
 
 	totalCount, err := GetTotalCount(apiClient, parameters)
+	log.Println(totalCount)
 	if err != nil {
 		return nil, err
 	}
 
 	numbOfRoutines := totalCount / numInBatch
+	log.Println("number of routines:", numbOfRoutines)
 	if numInBatch*numbOfRoutines < totalCount {
 		numbOfRoutines = numbOfRoutines + 1
 	}
-
+	log.Println("number of routines:", numbOfRoutines)
 	numOfJobs := numbOfRoutines
 	jobs := make(chan int, numOfJobs)
 	results := make(chan []SearchItem, numOfJobs)
 	//limiter := time.Tick(20 * time.Second)
-
+	log.Println("Number of workers:", numOfWorkers)
 	for batch := 0; batch < numOfWorkers; batch++ {
 
 		start := batch * numInBatch
-		if start > totalCount-numInBatch {
+		log.Println(totalCount - numInBatch)
+		if start > totalCount-numInBatch && batch != 0 {
+			log.Println("finish break ", start)
 			break
 		}
 
@@ -296,7 +301,7 @@ func GetAllMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient, dat
 
 		go getAllMetadataStartEndSearch(apiClient, parameters, jobs, results)
 	}
-
+	log.Println("number of Jobs:", numOfJobs)
 	// send jobs
 	for j := 0; j < numOfJobs; j++ {
 		jobs <- j * numInBatch
@@ -357,7 +362,7 @@ func GetSpecificMetadataOfDatasetsInDataverseSearchParallel(apiClient *ApiClient
 	log.Println("number of routines", numbOfRoutines)
 	log.Println("number of workers", numOfWorkers)
 
-	n := math.Min(float64(numOfWorkers),float64 (numbOfRoutines))
+	n := math.Min(float64(numOfWorkers), float64(numbOfRoutines))
 	numOfWorkers = int(n)
 
 	log.Println("New number of workers", numOfWorkers)
@@ -443,7 +448,7 @@ func GetAllMetadataOfDatasetsInDataverseSearch(apiClient *ApiClient, dataverseAl
 			"start":           strconv.Itoa(start),
 		}
 
-		u := apiClient.ApiToken + "/api/search"
+		u := apiClient.BaseUrl + "/api/search"
 		headers := map[string]interface{}{
 			"X-Dataverse-key": apiClient.ApiToken,
 		}
@@ -476,6 +481,49 @@ func GetAllMetadataOfDatasetsInDataverseSearch(apiClient *ApiClient, dataverseAl
 	}
 
 	return allItems, nil
+}
+
+func GetDatasetFromSearch(apiClient *ApiClient, q string, dvType string) ([]SearchItem, error) {
+	r := RequestResponse{}
+	s := SearchResult{}
+
+	parameters := map[string]interface{}{
+		"q":    q,
+		"type": dvType,
+	}
+
+	u := apiClient.BaseUrl + "/api/search"
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+	}
+	resp, err := GetRequest(parameters, u, headers, apiClient.HttpClient)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Errorf("Error to get search: %s", resp.Status)
+		return nil, fmt.Errorf("Error to get search: %s", resp.Status)
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&r)
+	if err != nil {
+		return nil, err
+	}
+	if r.Status == "OK" {
+		json.Unmarshal(r.Data, &s)
+	}
+	log.Println(s)
+	if len(s.Items) > 1 {
+		return s.Items, fmt.Errorf("Error more than 1 result found for query: %s", q)
+	}
+	if len(s.Items) == 0 {
+		return s.Items, fmt.Errorf("Error no result found for query: %s", q)
+	}
+
+	return s.Items, nil
+
 }
 
 // GetListOfMetadataBlocksOfDataverse get list of all metadatablocks for specific dataverse.
@@ -1048,7 +1096,94 @@ func GetListOfMandatoryFieldsOfDataverse(apiClient *ApiClient, dataverseAlias st
 	return requiredFields, nil
 }
 
-func GetJsonFromISO() error {
+func GetVersionsOfDataset(apiClient *ApiClient, parameters map[string]interface{}) ([]DatasetVersion, error) {
+	versions := make([]DatasetVersion, 0)
+	url := apiClient.BaseUrl + "/api/datasets/:persistentId/versions"
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+	}
+	r := RequestResponse{}
+	resp, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
+	if err != nil {
+		return versions, err
+	}
+	defer resp.Body.Close()
+	if err != nil {
+		return versions, err
+	}
+	log.Println(resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return versions, fmt.Errorf("Error to get versions of dataset: %s", resp.Status)
+	}
 
+	err = json.NewDecoder(resp.Body).Decode(&r)
+	if err != nil {
+		return versions, err
+	}
+	if r.Status == "OK" {
+		json.Unmarshal(r.Data, &versions)
+	} else {
+		return versions, fmt.Errorf("Error from server getting versions of dataset: %s ", r.Message)
+	}
+	return versions, nil
+}
+func AddFileToDataset(apiClient *ApiClient, parameters map[string]interface{}, filePath string, jsonData AddFileMetadata) error {
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+	}
+	url := apiClient.BaseUrl + "/api/datasets/:persistentId/add"
+	jsonBytes, err := json.Marshal(jsonData)
+	if err != nil {
+		return err
+	}
+
+	resp, err := PostRequestMultiPartJsonAndFile(parameters, url, headers, apiClient.HttpClient, filePath, string(jsonBytes), "POST")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	fmt.Println("Status:", resp.Status)
+	fmt.Println("Response:", string(respBody))
 	return nil
+}
+
+func UpdateFileMetadata(apiClient *ApiClient, parameters map[string]interface{}, jsonData UpdateFileMetadataStruct, fileId int) error {
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+	}
+	fileIdString := strconv.Itoa(fileId)
+	url := apiClient.BaseUrl + "/api/files/" + fileIdString + "/metadata"
+	log.Println(url)
+	jsonBytes, err := json.Marshal(jsonData)
+	if err != nil {
+		return err
+	}
+
+	resp, err := PostRequestMultiPartJsonAndFile(parameters, url, headers, apiClient.HttpClient, "", string(jsonBytes), "POST")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	fmt.Println("Status:", resp.Status)
+	fmt.Println("Response:", string(respBody))
+	return nil
+}
+
+func LoadConfig(filename string) (*Config, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var config Config
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &config, nil
 }

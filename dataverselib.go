@@ -1,6 +1,7 @@
 package dataverselib
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -825,9 +827,10 @@ func CreateHeadersCSVMetadata(apiClient *ApiClient, dataverseAlias string) ([]st
 	return headers, nil
 }
 
-func CreateDatasetWithJson(apiClient *ApiClient, dataverseAlias string, parameters map[string]interface{}, jsonData []byte) (string, error) {
+func CreateDatasetWithJson(apiClient *ApiClient, dataverseAlias string, parameters map[string]interface{}, jsonData []byte) (MinimalDataset, error) {
 	// curl -H "X-Dataverse-key:$API_TOKEN" -X POST "$SERVER_URL/api/dataverses/$PARENT/datasets?doNotValidate=true" --upload-file dataset-incomplete.json -H 'Content-type:application/json'
-	persistentId := ""
+	r := RequestResponse{}
+	dataset := MinimalDataset{}
 	url := apiClient.BaseUrl + "/api/dataverses/" + dataverseAlias + "/datasets"
 	headers := map[string]interface{}{
 		"X-Dataverse-key": apiClient.ApiToken,
@@ -838,23 +841,39 @@ func CreateDatasetWithJson(apiClient *ApiClient, dataverseAlias string, paramete
 	resp, err := PostRequest(parameters, url, headers, apiClient.HttpClient, jsonData)
 	if err != nil {
 		log.Println(err)
-		return persistentId, err
+		return dataset, err
 	}
 
 	defer resp.Body.Close()
 	if err != nil {
-		return persistentId, err
+		return dataset, err
 	}
 	fmt.Println(resp.StatusCode)
 	if resp.StatusCode != 201 {
 		bodyBytes, err := io.ReadAll(resp.Body)
+
+		fmt.Println("Status:", resp.Status)
+		fmt.Println("Response:", string(bodyBytes))
 		if err != nil {
-			return persistentId, err
+			return dataset, err
 		}
-		return persistentId, fmt.Errorf("Error CreateDatasetWithJson: %s, %d\n", string(bodyBytes), resp.StatusCode)
+		return dataset, fmt.Errorf("Error CreateDatasetWithJson: %s, %d\n", string(bodyBytes), resp.StatusCode)
 	}
 
-	return persistentId, nil
+	err = json.NewDecoder(resp.Body).Decode(&r)
+	if err != nil {
+		return dataset, err
+	}
+
+	if r.Status == "OK" {
+		json.Unmarshal(r.Data, &dataset)
+	} else {
+		return dataset, fmt.Errorf("Error from server getting versions of dataset: %s ", r.Message)
+	}
+	log.Println(r)
+	log.Println("++++++++++++")
+	log.Println(dataset)
+	return dataset, nil
 }
 func FindRequiredFields(metaFields []MetadataBlockInfo) (map[string][]string, error) {
 	requiredFields := make(map[string][]string)
@@ -1023,8 +1042,10 @@ func CreateDataverseDatasetVersionStruct(metaFields []MetadataBlockInfo, headers
 	return datasetVersion, nil
 }
 
-func CreateDataset(apiClient *ApiClient, dataverseAlias string, datasetVersion DatasetVersion) (string, error) {
+func CreateDataset(apiClient *ApiClient, dataverseAlias string, datasetVersion DatasetVersion) (MinimalDataset, error) {
+	minDataset := MinimalDataset{}
 	//default license CC0 1.0
+	log.Println(datasetVersion.TermsOfUse)
 	if datasetVersion.License.Name == "" && datasetVersion.License.Uri == "" {
 		datasetVersion.License.Name = "CC0 1.0"
 		datasetVersion.License.Uri = "http://creativecommons.org/publicdomain/zero/1.0"
@@ -1036,13 +1057,14 @@ func CreateDataset(apiClient *ApiClient, dataverseAlias string, datasetVersion D
 
 	jsonData, err := json.Marshal(dataset)
 	if err != nil {
-		return "", fmt.Errorf("Error marshalling dataset version: %s", err)
+		return minDataset, fmt.Errorf("Error marshalling dataset version: %s", err)
 	}
-	persistentId, err := CreateDatasetWithJson(apiClient, dataverseAlias, nil, jsonData)
+	minDataset, err = CreateDatasetWithJson(apiClient, dataverseAlias, nil, jsonData)
 	if err != nil {
-		return "", fmt.Errorf("Error creating dataset with json: %s", err)
+		return minDataset, fmt.Errorf("Error creating dataset with json: %s", err)
 	}
-	return persistentId, nil
+
+	return minDataset, nil
 }
 
 // GetListOfMandatoryFieldsOfDataverse returns a map of blocks with mandatory fields for specific dataverse collection.
@@ -1151,6 +1173,7 @@ func AddFileToDataset(apiClient *ApiClient, parameters map[string]interface{}, f
 func UpdateFileMetadata(apiClient *ApiClient, parameters map[string]interface{}, jsonData UpdateFileMetadataStruct, fileId int) error {
 	headers := map[string]interface{}{
 		"X-Dataverse-key": apiClient.ApiToken,
+		"Content-Type":    "application/json",
 	}
 	fileIdString := strconv.Itoa(fileId)
 	url := apiClient.BaseUrl + "/api/files/" + fileIdString + "/metadata"
@@ -1161,6 +1184,7 @@ func UpdateFileMetadata(apiClient *ApiClient, parameters map[string]interface{},
 	}
 
 	resp, err := PostRequestMultiPartJsonAndFile(parameters, url, headers, apiClient.HttpClient, "", string(jsonBytes), "POST")
+
 	if err != nil {
 		return err
 	}
@@ -1169,6 +1193,78 @@ func UpdateFileMetadata(apiClient *ApiClient, parameters map[string]interface{},
 	fmt.Println("Status:", resp.Status)
 	fmt.Println("Response:", string(respBody))
 	return nil
+}
+
+func AddFilesToDataset(apiClient *ApiClient, pid string, files []File) error {
+	for _, file := range files {
+		log.Println(file)
+	}
+	return nil
+}
+
+func UpdateCustomTermsOfUse(apiClient *ApiClient, id int, customTerms CustomTerms) error {
+	idStr := strconv.Itoa(id)
+	url := apiClient.BaseUrl + "/api/datasets/" + idStr + "/license"
+
+	headers := map[string]interface{}{
+		"X-Dataverse-key": apiClient.ApiToken,
+		"Content-Type":    "application/json",
+	}
+	parameters := map[string]interface{}{}
+	ct := CreateCustomTerms{
+		CustomTerms: customTerms,
+	}
+
+	jsonData, err := json.Marshal(ct)
+	log.Println(string(jsonData))
+	if err != nil {
+		return err
+	}
+	resp, err := PutRequest(parameters, url, headers, apiClient.HttpClient, jsonData)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	fmt.Println("Status:", resp.Status)
+	fmt.Println("Response:", string(respBody))
+	return nil
+}
+
+func CreateAllVersionsOfDataset(apiClient *ApiClient, dataverseAlias string, datasetVersions []DatasetVersion) (MinimalDataset, error) {
+	dataset := MinimalDataset{}
+	slices.SortStableFunc(datasetVersions, func(dv1, dv2 DatasetVersion) int {
+
+		if dv1.VersionState == "DRAFT" && dv2.VersionState == "RELEASED" {
+
+			return 1
+		}
+		if dv1.VersionState == "RELEASED" && dv2.VersionState == "DRAFT" {
+			return -1
+		}
+		if dv1.VersionNumber == dv2.VersionNumber {
+			return cmp.Compare(dv1.VersionMinorNumber, dv2.VersionMinorNumber)
+		} else {
+			return cmp.Compare(dv1.VersionNumber, dv2.VersionNumber)
+		}
+	})
+
+	if len(datasetVersions) > 0 {
+		files := datasetVersions[0].Files
+		log.Println(files)
+		datasetVersions[0].Files = nil
+		dataset, err := CreateDataset(apiClient, dataverseAlias, datasetVersions[0])
+		log.Println(dataset)
+		if err != nil {
+			return dataset, fmt.Errorf("Error creating dataset version ", err)
+		}
+		log.Printf("Created dataset version with pid: %s\n", dataset.Pid)
+		return dataset, nil
+		//AddFilesToDataset(apiClient, pid, datasetVersions[0].Files)
+	} else {
+		return dataset, fmt.Errorf("No dataset versions to create")
+	}
+
 }
 
 func LoadConfig(filename string) (*Config, error) {

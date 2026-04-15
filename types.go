@@ -131,10 +131,30 @@ type DatasetVersion struct {
 	PublicationDate              string    `json:"publicationDate,omitempty"`
 	CitationDate                 string    `json:"citationDate,omitempty"`
 	License                      License   `json:"license,omitempty"`
+	TermsOfUse                   string    `json:"termsOfUse,omitempty"`
+	Restrictions                 string    `json:"restrictions,omitempty"`
+	CitationRequirements         string    `json:"citationRequirements,omitempty"`
+	Disclaimer                   string    `json:"disclaimer,omitempty"`
+	OriginalArchive              string    `json:"originalArchive,omitempty"`
 	FileAccessRequest            bool      `json:"fileAccessRequest,omitempty"`
 
 	MetadataBlocks map[string]MetadataBlock `json:"metadataBlocks,omitempty"`
 	Files          []File                   `json:"files,omitempty"`
+}
+
+type CustomTerms struct {
+	TermsOfUse                 string `json:"termsOfUse"`
+	ConfidentialityDeclaration string `json:"confidentialityDeclaration"`
+	SpecialPermissions         string `json:"specialPermissions,omitempty"`
+	Restrictions               string `json:"restrictions,omitempty"`
+	CitationRequirements       string `json:"citationRequirements,omitempty"`
+	DepositorRequirements      string `json:"depositorRequirements,omitempty"`
+	Conditions                 string `json:"conditions,omitempty"`
+	Disclaimer                 string `json:"disclaimer,omitempty"`
+}
+
+type CreateCustomTerms struct {
+	CustomTerms CustomTerms `json:"customTerms"`
 }
 type CreateDatasetItem struct {
 	DatasetVersionField DatasetVersion `json:"datasetVersion"`
@@ -155,8 +175,8 @@ type ItemInDataverse struct {
 }
 
 type MinimalDataset struct {
-	Id  int
-	Pid string
+	Id  int    `json:"id"`
+	Pid string `json:"persistentId"`
 }
 
 type RequestResponse struct {

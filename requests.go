@@ -80,6 +80,11 @@ func PostRequest(requestParameters map[string]interface{}, urlString string, hea
 	return resp, err
 }
 
+func PutRequest(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, jsonData []byte) (*http.Response, error) {
+	resp, err := Request(requestParameters, urlString, headers, client, jsonData, "PUT")
+	return resp, err
+}
+
 func PostRequestFile(requestParameters map[string]interface{}, urlString string, headers map[string]interface{}, client *http.Client, filePath string) (*http.Response, error) {
 	// Read file
 	data, err := os.ReadFile(filePath)
@@ -119,11 +124,13 @@ func PostRequestMultiPartJsonAndFile(requestParameters map[string]interface{}, u
 	}
 
 	//Add json file metadata
-	err := writer.WriteField("jsonData", jsonData)
-	if err != nil {
-		return resp, err
+	if jsonData != "" {
+		err := writer.WriteField("jsonData", jsonData)
+		if err != nil {
+			return resp, err
+		}
+		log.Println("Added json")
 	}
-	log.Println("Added json")
 
 	writer.Close()
 
@@ -167,7 +174,7 @@ func PostRequestMultiPartJsonAndFile(requestParameters map[string]interface{}, u
 		}
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-
+	log.Println(writer.FormDataContentType())
 	resp, err = client.Do(req)
 	if err != nil {
 		return resp, err

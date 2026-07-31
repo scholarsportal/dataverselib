@@ -1663,10 +1663,11 @@ func ReExportDataset(apiClient *ApiClient, pid string) error {
 		"persistentId": pid,
 	}
 	headers := map[string]interface{}{}
-	resp, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
+	_, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
 	if err != nil {
 		return err
 	}
+	return nil
 }
 
 func ReExportDataverse(apiClient *ApiClient, dataverseAlias string) error {

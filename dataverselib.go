@@ -1663,7 +1663,8 @@ func ReExportDataset(apiClient *ApiClient, pid string) error {
 		"persistentId": pid,
 	}
 	headers := map[string]interface{}{}
-	_, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
+	resp, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
+	log.Println(resp.StatusCode)
 	if err != nil {
 		return err
 	}

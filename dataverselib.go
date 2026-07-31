@@ -1286,6 +1286,7 @@ func AddFileToDatasetFromMemory(apiClient *ApiClient, parameters map[string]inte
 
 	return f.Files[0].DataFile.Id, nil
 }
+
 //func deleteFileFromDataset(apiClient *ApiClient, fileId int) error {
 //
 //}func deleteFileFromDataset(apiClient *ApiClient, fileId int) error {
@@ -1652,6 +1653,35 @@ func CreateAllVersionsOfDataset(apiClientOrigin *ApiClient, apiClientTarget *Api
 	}
 	return dataset, nil
 
+}
+
+func ReExportDataset(apiClient *ApiClient, pid string) error {
+
+	//http://localhost:8080/api/admin/metadata/:persistentId/reExportDataset?persistentId=doi:10.5072/FK2/AAA000
+	url := "http://localhost:8080/api/admin/metadata/:persistentId/reExportDataset"
+	parameters := map[string]interface{}{
+		"persistentId": pid,
+	}
+	headers := map[string]interface{}{}
+	resp, err := GetRequest(parameters, url, headers, apiClient.HttpClient)
+	if err != nil {
+		return err
+	}
+}
+
+func ReExportDataverse(apiClient *ApiClient, dataverseAlias string) error {
+	datasets := make([]MinimalDataset, 0)
+	err := GetAllDatasetsInDataverseAndSubdataverses(apiClient, dataverseAlias, &datasets)
+	if err != nil {
+		return err
+	}
+	for _, dataset := range datasets {
+		err = ReExportDataset(apiClient, dataset.Pid)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func LoadConfig(filename string) (*Config, error) {
